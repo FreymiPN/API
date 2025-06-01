@@ -1,4 +1,7 @@
-Flask
+flask
+bson
+dotenv
+os
 pymongo
 certifi
 gunicorn
