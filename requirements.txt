@@ -1,7 +1,5 @@
 flask
-bson
-dotenv
-os
+python-dotenv
 pymongo
 certifi
 gunicorn
