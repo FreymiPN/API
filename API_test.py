@@ -1,12 +1,7 @@
 from flask import Flask, jsonify, request
-from bson import ObjectId
-from dotenv import load_dotenv
 import os
-import certifi
 from pymongo import MongoClient
 
-# .env nur lokal laden. Render verwendet die Umgebungsvariablen direkt.
-load_dotenv()
 
 # Zugriff auf MONGO_URI aus Umgebungsvariable
 MONGO_URI = os.environ.get("MONGO_URI")
