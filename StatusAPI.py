@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 import os
 from pymongo import MongoClient
+from bson.objectid import ObjectId  # convert string id to ObjectId type
 
 
 # GET MONGO URI FROM ENV.VARIABLE
@@ -74,30 +75,74 @@ def set_status():
 def update_status():
     # CHECK IF DB CONNECTION EXISTS
     if status_collection is None:
-        return jsonify({"error": "No database connection"}), 500
-    # VAliDATE INPUT
+        return jsonify({"error": "No database connection"}), 503
+
+    # VALIDATE INPUT
     try:
+        # force=True is used to parse the request body even if the MIME type
+        # is not correctly set by the client (e.g., in some test environments)
         data = request.get_json(force=True)
-        new_status = data.get("status", "off").lower()
-        # VALIDATE STATUS VALUE
+
+        # 1. EXTRACT ID AND STATUS
+        # We need the _id to filter the document. If it's missing, we cannot update a specific status.
+        document_id_str = data.get("_id")
+        # Use empty string as default, must be explicitly provided
+        new_status = data.get("status", "").lower()
+
+        # 2. VALIDATE REQUIRED FIELDS
+        if not document_id_str:
+            return jsonify({"error": "Missing '_id' field for targeted update"}), 400
         if new_status not in ["on", "off"]:
             return jsonify({"error": "Status must be 'on' or 'off'"}), 400
 
+        # 3. CREATE FILTER QUERY
+        # Convert the received string ID into a MongoDB ObjectId type for correct filtering.
+        try:
+            document_id_obj = ObjectId(document_id_str)
+        except:
+            return (
+                jsonify(
+                    {
+                        "error": "Invalid '_id' format. Must be a valid 24-character hex string."
+                    }
+                ),
+                400,
+            )
+
+        # Define the filter to find the specific document by its ObjectId
+        filter_query = {"_id": document_id_obj}
+
+        # Define the update action (what to change)
+        update_action = {"$set": {"status": new_status}}
+
+        # Execute the update operation
+        # NOTE: If the ID does not exist, this will not create a new document
+        # because upsert=True is omitted.
         result = status_collection.update_one(
-            {}, {"$set": {"status": new_status}}, upsert=True
+            filter_query,  # ARG 1: The document to find (based on the sent ID)
+            update_action,  # ARG 2: The fields to update
         )
 
         if result.matched_count > 0:
-            return jsonify({"message": f"Status updated to {new_status}"}), 200
+            # Document was found and updated
+            return (
+                jsonify(
+                    {
+                        "message": f"Status for ID {document_id_str} updated to {new_status}"
+                    }
+                ),
+                200,
+            )
         else:
-            return jsonify({"message": f"Status set to {new_status}"}), 201
+            # Document was not found
+            return (
+                jsonify({"message": f"Document with ID {document_id_str} not found."}),
+                404,
+            )
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-#
-#    app.run(host="0.0.0.0", port=port)
+        print(f"Update error: {e}")
+        return jsonify({"error": "Internal Server Error", "details": str(e)}), 500
 
 
 if __name__ == "__main__":
