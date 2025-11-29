@@ -74,7 +74,7 @@ def create_customer():
 
 
 # 2. API ENDPOINT TO ASSIGN HANGER TO CUSTOMER
-@app.route("assign_hanger", methods=["POST"])
+@app.route("/assign_hanger", methods=["POST"])
 def assign_hanger():
     if customers_collection is None:
         return jsonify({"error": "No database connection"}), 500
