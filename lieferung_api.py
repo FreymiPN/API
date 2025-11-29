@@ -27,22 +27,19 @@ try:
             "MONGO_URI Umgebungsvariable ist nicht gesetzt. Bitte in den Render Environment Variables prüfen."
         )
 
-    # Ausgabe der verwendeten URI (ohne sensible Teile) zur Debugging-Hilfe im Log.
-    # Wichtig: Das Passwort wird hier nicht vollständig ausgegeben.
+    # Ausgabe der verwendeten URI (ohne sensible Teile) zur Debugging-Hilfe im Log
     print(
         f"Verbindungs-URI (aus Umgebungsvariable geladen): {mongo_uri.split('@')[0]}@...{mongo_uri.split('/')[-1]}"
     )
 
-    # Aufbau der MongoDB-Verbindung. Für Render wird tlsCAFile nicht explizit benötigt,
-    # da die Render-Umgebung die SSL-Zertifikate automatisch handhabt.
+    # Aufbau der MongoDB-Verbindung
     client = MongoClient(mongo_uri)
 
-    # Testen der Verbindung durch einen Ping-Befehl an die Datenbank.
+    # Testen der Verbindung durch einen Ping-Befehl an die Datenbank
     client.admin.command("ping")
     print("Erfolgreich mit MongoDB Atlas verbunden!")
 
-    # Auswahl der Datenbank und der Collections.
-    # Der Datenbankname "SmarthomeBox" sollte Teil der MONGO_URI sein.
+    # Auswahl der Datenbank und der Collections
     db = client["SmarthomeBox"]
     kunden_collection = db["kunden"]
     lieferungen_collection = db["lieferungen"]
@@ -131,7 +128,7 @@ def create_customer():
         )
 
 
-# API-Endpunkt zum Abrufen aller Kunden.
+# API-Endpunkt zum Abrufen aller Kunden
 @app.route("/customers", methods=["GET"])
 def get_customers():
     error_response = check_db_connection()
@@ -139,11 +136,11 @@ def get_customers():
         return error_response
     try:
         customers = []
-        # Alle Kunden aus der Collection abrufen und konvertieren.
+        # Alle Kunden aus der Collection abrufen und konvertieren
         for doc in kunden_collection.find({}):
             doc["_id"] = str(
                 doc["_id"]
-            )  # Konvertiert ObjectId zu String für JSON-Kompatibilität.
+            )  # Konvertiert ObjectId zu String für JSON-Kompatibilität
             customers.append(doc)
         return jsonify(customers)
     except Exception as e:
@@ -159,7 +156,7 @@ def get_customers():
         )
 
 
-# API-Endpunkt zum Erstellen einer neuen Lieferung.
+# API-Endpunkt zum Erstellen einer neuen Lieferung
 @app.route("/create_delivery", methods=["POST"])
 def create_delivery():
     error_response = check_db_connection()
@@ -176,17 +173,17 @@ def create_delivery():
         if not customer:
             return jsonify({"error": f"Kunde '{customer_name}' nicht gefunden"}), 400
 
-        # Generierung eines eindeutigen Sicherheitsschlüssels für die Lieferung.
+        # Generierung eines eindeutigen Sicherheitsschlüssels für die Lieferung
         security_key = generate_security_key()
         delivery = {
             "customer_id": str(customer["_id"]),
             "adresse": customer.get("adresse", "Unbekannt"),
-            "security_key": security_key,  # Der Sicherheitsschlüssel wird mit der Lieferung gespeichert.
-            "status": "pending",  # Initialer Status der Lieferung.
+            "security_key": security_key,  # Der Sicherheitsschlüssel wird mit der Lieferung gespeichert
+            "status": "pending",  # Initialer Status der Lieferung
         }
-        # Lieferung in die Datenbank einfügen.
+        # Lieferung in die Datenbank einfügen
         delivery_id = lieferungen_collection.insert_one(delivery).inserted_id
-        # Rückgabe der Liefer-ID und des Sicherheitsschlüssels an den Client.
+        # Rückgabe der Liefer-ID und des Sicherheitsschlüssels an den Client
         return jsonify({"delivery_id": str(delivery_id), "security_key": security_key})
     except Exception as e:
         print(f"Fehler in create_delivery: {e}")
@@ -201,7 +198,7 @@ def create_delivery():
         )
 
 
-# API-Endpunkt zum Aktualisieren des Lieferstatus (pending -> on route -> delivered).
+# API-Endpunkt zum Aktualisieren des Lieferstatus (pending -> on route -> delivered)
 @app.route("/update_status", methods=["POST"])
 def update_status():
     error_response = check_db_connection()
@@ -213,7 +210,7 @@ def update_status():
         if not security_key:
             return jsonify({"error": "Sicherheitsschlüssel in der Anfrage fehlt."}), 400
 
-        # Lieferung anhand des bereitgestellten Sicherheitsschlüssels finden und verifizieren.
+        # Lieferung anhand des bereitgestellten Sicherheitsschlüssels finden und verifizieren
         delivery = lieferungen_collection.find_one({"security_key": security_key})
         if not delivery:
             return (
@@ -224,13 +221,13 @@ def update_status():
             )
 
         current_status = delivery["status"]
-        # Logik zur Statusänderung basierend auf dem aktuellen Status.
+        # Logik zur Statusänderung basierend auf dem aktuellen Status
         if current_status == "pending":
             new_status = "on route"
         elif current_status == "on route":
             new_status = "delivered"
         else:
-            # Verhindert weitere Statusänderungen, wenn bereits zugestellt.
+            # Verhindert weitere Statusänderungen, wenn bereits zugestellt
             return jsonify({"error": "Lieferung bereits zugestellt"}), 400
 
         # Aktualisiert den Status in der Datenbank.
@@ -251,7 +248,7 @@ def update_status():
         )
 
 
-# API-Endpunkt zur Verifizierung einer Lieferung.
+# API-Endpunkt zur Verifizierung einer Lieferung
 @app.route("/verify_delivery", methods=["POST"])
 def verify_delivery():
     error_response = check_db_connection()
@@ -263,7 +260,7 @@ def verify_delivery():
         if not security_key:
             return jsonify({"error": "Sicherheitsschlüssel in der Anfrage fehlt."}), 400
 
-        # Lieferung anhand des bereitgestellten Sicherheitsschlüssels finden.
+        # Lieferung anhand des bereitgestellten Sicherheitsschlüssels finden
         delivery = lieferungen_collection.find_one({"security_key": security_key})
         if not delivery:
             return (
@@ -273,7 +270,7 @@ def verify_delivery():
                 400,
             )
 
-        # Prüfen, ob die Lieferung den Status "delivered" hat.
+        # Prüfen, ob die Lieferung den Status "delivered" hat
         if delivery["status"] != "delivered":
             return jsonify({"error": "Lieferung noch nicht abgeschlossen"}), 400
 
@@ -291,7 +288,7 @@ def verify_delivery():
         )
 
 
-# API-Endpunkt zum Abrufen aller Lieferungen.
+# API-Endpunkt zum Abrufen aller Lieferungen
 @app.route("/deliveries", methods=["GET"])
 def get_deliveries():
     error_response = check_db_connection()
@@ -299,7 +296,7 @@ def get_deliveries():
         return error_response
     try:
         deliveries = []
-        # Alle Lieferungen abrufen und IDs konvertieren.
+        # Alle Lieferungen abrufen und IDs konvertieren
         for doc in lieferungen_collection.find({}):
             doc["_id"] = str(doc["_id"])
             if "customer_id" in doc:
@@ -321,8 +318,7 @@ def get_deliveries():
 
 # Startpunkt der Flask-Anwendung.
 if __name__ == "__main__":
-    # Der Port wird von der Umgebungsvariable PORT (gesetzt von Render) gelesen.
-    # Ein Fallback-Port (5001) wird für lokale Tests verwendet.
+    # Der Port wird von der Umgebungsvariable PORT (gesetzt von Render) gelesen
     port = int(os.environ.get("PORT", 5001))
-    # debug=False für Produktionsumgebungen, host="0.0.0.0" für den Zugriff von außen.
+    # debug=False für Produktionsumgebungen, host="0.0.0.0" für den Zugriff von außen
     app.run(debug=False, host="0.0.0.0", port=port)

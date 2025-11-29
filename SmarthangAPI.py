@@ -18,15 +18,11 @@ try:
 
     # CHECK IF ENV VAIABLE IS SET
     if not mongo_uri:
-        raise ValueError(
-            "MONGO_URI Umgebungsvariable ist nicht gesetzt. Bitte in den Render Environment Variables prüfen."
-        )
-
+        raise ValueError("MONGO_URI Umgebungsvariable ist nicht gesetzt. Bitte in den Render Environment Variables prüfen.")
     print(f"Connection-URI: {mongo_uri.split('@')[0]}@...{mongo_uri.split('/')[-1]}")
 
     # CONNECTION TO MONGO ATLAS
     client = MongoClient(mongo_uri)
-
     # TEST CONNECTION VIA PING
     client.admin.command("ping")
     print("Successfully connected to MongoDB Atlas!")
@@ -36,7 +32,6 @@ try:
     status_collection = db["Status"]
     logs_collection = db["logs"]
     print("DB & Collection selected.")
-
 
 except Exception as e:
     print(f"ERROR: Database connection failed: {e}")
@@ -68,7 +63,7 @@ def create_customer():
             "last_name": last_name,
             "email": email,
             "registration_date": datetime.now(),
-            "hangers": [],  # empty list as hangers will be linked which will trigger the hanger_id to be added
+            "hangers": [],  # empty list, hangers will be linked via APP which will trigger the hanger_id to be added
         }
 
         customers_collection.insert_one(customer_doc)
@@ -78,55 +73,40 @@ def create_customer():
         return jsonify({"error": str(e)}), 500
 
 
-# 2. API ENDPOITN TO ASSIGN HANGER TO CUSTOMER
+# 2. API ENDPOINT TO ASSIGN HANGER TO CUSTOMER
 @app.route("assign_hanger", methods=["POST"])
 def assign_hanger():
     if customers_collection is None:
         return jsonify({"error": "No database connection"}), 500
     try:
         data = request.get_json()
-
         user_id = data.get("user_id")
         hanger_id = data.get("hanger_id")
 
-        if (
-            not user_id or hanger_id is None
-        ):  # 0 can be a valid id, so check explicitly for None
+        if not user_id or hanger_id is None:  # 0 can be a valid id, so check explicitly for None
             return jsonify({"error": "Please provide user_id and hanger_id"}), 400
 
         # Validate Hanger ID (16-bit Unsigned Integer: 0 to 65535)
         try:
             hanger_id_int = int(hanger_id)
-            # Use math notation for 16-bit limit (2^16 - 1) for better readability
             if not (0 <= hanger_id_int <= 2**16 - 1):
-                return (
-                    jsonify({"error": "Hanger ID out of 16-bit range (0-65535)"}),
-                    400,
-                )
+                return (jsonify({"error": "Hanger ID out of 16-bit range (0-65535)"}), 400)
         except ValueError:
             return jsonify({"error": "Hanger ID must be an integer"}), 400
 
         # Create the hanger object to store in the user's profile
         new_hanger_object = {
-            "hanger_id": hanger_id_int,  # Storing as INT now (Consistent with update logic)
-            "status": "inactive",  # Default status after pairing
+            "hanger_id": hanger_id_int,  # Storing as INT now (has to be consistent with update logic)
+            "status": "inactive",  # always default status after pairing
             "paired_at": datetime.now(),
         }
 
-        # Update the customer document
-        # $addToSet ensures we don't add the exact same hanger object twice
-        result = customers_collection.update_one(
-            {"user_id": int(user_id)}, {"$addToSet": {"hangers": new_hanger_object}}
-        )
+        # Update the customer document, $addToSet ensures we don't add the exact same hanger object twice
+        result = customers_collection.update_one({"user_id": int(user_id)}, {"$addToSet": {"hangers": new_hanger_object}})
 
         if result.matched_count > 0:
             if result.modified_count > 0:
-                return (
-                    jsonify(
-                        {"message": f"Hanger {hanger_id_int} paired to User {user_id}"}
-                    ),
-                    200,
-                )
+                return (jsonify({"message": f"Hanger {hanger_id_int} paired to User {user_id}"}), 200)
             else:
                 return jsonify({"message": "Hanger was already paired."}), 200
         else:
@@ -138,7 +118,7 @@ def assign_hanger():
         return jsonify({"error": str(e)}), 500
 
 
-# 3. API ENDPOINT TO UPDATE STATUS (Control via App)
+# 3. API ENDPOINT TO UPDATE STATUS (via App)
 # App sends: {"user_id": 12345, "hanger_id": 1024, "status": "drying"}
 @app.route("/update_status", methods=["PUT"])
 def update_status():
@@ -159,10 +139,7 @@ def update_status():
         # Extended status list as requested
         allowed_statuses = ["inactive", "active", "heating", "drying", "on", "off"]
         if new_status not in allowed_statuses:
-            return (
-                jsonify({"error": f"Invalid status. Allowed: {allowed_statuses}"}),
-                400,
-            )
+            return (jsonify({"error": f"Invalid status. Allowed: {allowed_statuses}"}), 400)
 
         # THE UPDATE LOGIC:
         # 1. Filter: Find user by ID AND matching hanger_id (as INT) in the array
@@ -184,10 +161,7 @@ def update_status():
         if result.matched_count > 0:
             return jsonify({"message": f"Status updated to {new_status}"}), 200
         else:
-            return (
-                jsonify({"error": "User not found or Hanger not paired to this user."}),
-                404,
-            )
+            return (jsonify({"error": "User not found or Hanger not paired to this user."}), 404)
 
     except ValueError:
         return jsonify({"error": "IDs must be integers"}), 400
@@ -196,8 +170,7 @@ def update_status():
 
 
 # 4. LOG TEMPERATURE (Data from Hardware)
-# Hardware sends: {"hanger_id": 1024, "temperature": 45.5}
-# Note: Hardware does NOT send user_id. API looks it up in the DB.
+# Hardware sends: {"hanger_id": 1024, "temperature": 45.5}, KIM:  API looks it up in the DB.
 @app.route("/log_temp", methods=["POST"])
 def log_temperature():
     if logs_collection is None:
@@ -212,10 +185,7 @@ def log_temperature():
 
         # Check for missing fields
         if hanger_id is None or temperature is None:
-            return (
-                jsonify({"error": "Missing required fields: hanger_id or temperature"}),
-                400,
-            )
+            return jsonify({"error": "Missing required fields: hanger_id or temperature"}), 400
 
         try:
             # Type Conversion
@@ -227,18 +197,10 @@ def log_temperature():
                 return jsonify({"error": "Hanger ID out of valid 16-bit range"}), 400
 
             # 1. LOOKUP OWNER: Find the customer who has this hanger in their list
-            # We query the 'Customers' collection looking for the specific hanger_id inside the 'hangers' array
+            # query the 'Customers' collection looking for the specific hanger_id inside the 'hangers' array
             owner = customers_collection.find_one({"hangers.hanger_id": hanger_id_int})
-
             if not owner:
-                return (
-                    jsonify(
-                        {
-                            "error": f"Hanger {hanger_id_int} is not paired to any user. Data ignored."
-                        }
-                    ),
-                    404,
-                )
+                return (jsonify({"error": f"Hanger {hanger_id_int} is not paired to any user. Data ignored."}), 404)
 
             # 2. Extract the User ID from the found owner document
             user_id_int = owner["user_id"]
@@ -251,21 +213,11 @@ def log_temperature():
             }
 
         except ValueError:
-            return (
-                jsonify(
-                    {
-                        "error": "Data type error: hanger_id must be int, temp must be float"
-                    }
-                ),
-                400,
-            )
+            return jsonify({"error": "Data type error: hanger_id must be int, temp must be float"}), 400
 
         result = logs_collection.insert_one(log_entry)
 
-        return (
-            jsonify({"message": "Log entry created", "id": str(result.inserted_id)}),
-            201,
-        )
+        return jsonify({"message": "Log entry created", "id": str(result.inserted_id)}), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
