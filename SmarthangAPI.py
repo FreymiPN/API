@@ -29,8 +29,10 @@ try:
 
     # CHOOSE DB AND COLLECTION
     db = client["SmartHanger"]
+    # customers_collection = db
     status_collection = db["Status"]
     logs_collection = db["logs"]
+    customers_collection = db["Customers"]
     print("DB & Collection selected.")
 
 except Exception as e:
@@ -40,11 +42,11 @@ except Exception as e:
 
 
 # ------- START API ENDPOINTS ------- #
-# 1. API ENDPOITN TO CREATE CUSTOMER
+# 1. API ENDPOINT TO CREATE CUSTOMER
 @app.route("/create_customer", methods=["POST"])
 def create_customer():
     if customers_collection is None:
-        return jsonify({"error": "No database connection"}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
     try:
         data = request.get_json()
@@ -53,10 +55,15 @@ def create_customer():
         email = data.get("email")
 
         if not first_name or not email:
-            return jsonify({"error": "No database connection"}), 500
+            return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
         # Generate random 32bit user_id
-        new_user_id = random.randint(1, 2**32 - 1)  # max 32bit integer
+        while True:
+            new_user_id = random.randint(1, 2**16 - 1)  # max 16bit integer, avoid 0
+            existing_user = customers_collection.find_one({"user_id": new_user_id})  # check for unique user_id
+            if not existing_user:
+                break
+
         customer_doc = {
             "user_id": new_user_id,
             "first_name": first_name,
@@ -70,34 +77,34 @@ def create_customer():
         return jsonify({"message": "Customer created", "user_id": new_user_id}), 201
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
 
 # 2. API ENDPOINT TO ASSIGN HANGER TO CUSTOMER
 @app.route("/assign_hanger", methods=["POST"])
 def assign_hanger():
     if customers_collection is None:
-        return jsonify({"error": "No database connection"}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
     try:
         data = request.get_json()
         user_id = data.get("user_id")
         hanger_id = data.get("hanger_id")
 
-        if not user_id or hanger_id is None:  # 0 can be a valid id, so check explicitly for None
-            return jsonify({"error": "Please provide user_id and hanger_id"}), 400
+        if not user_id or hanger_id is None:  # 0 can be a valid id, so check explicitly for None, check and remove if not needed
+            return jsonify({"error": "BAD_REQUEST: Please provide user_id and hanger_id"}), 400
 
-        # Validate Hanger ID (16-bit Unsigned Integer: 0 to 65535)
+        # Validate Hanger ID (16-bit Unsigned Integer: 1 to 65535)
         try:
             hanger_id_int = int(hanger_id)
-            if not (0 <= hanger_id_int <= 2**16 - 1):
-                return (jsonify({"error": "Hanger ID out of 16-bit range (0-65535)"}), 400)
+            if not (1 <= hanger_id_int <= 2**16 - 1):
+                return (jsonify({"error": "BAD_REQUEST: Hanger ID out of 16-bit range (1-65535)"}), 400)
         except ValueError:
-            return jsonify({"error": "Hanger ID must be an integer"}), 400
+            return jsonify({"error": "BAD_REQUEST: Hanger ID must be an integer"}), 400
 
         # Create the hanger object to store in the user's profile
         new_hanger_object = {
             "hanger_id": hanger_id_int,  # Storing as INT now (has to be consistent with update logic)
-            "status": "inactive",  # always default status after pairing
+            "status": "off",  # always default status after pairing
             "paired_at": datetime.now(),
         }
 
@@ -106,16 +113,16 @@ def assign_hanger():
 
         if result.matched_count > 0:
             if result.modified_count > 0:
-                return (jsonify({"message": f"Hanger {hanger_id_int} paired to User {user_id}"}), 200)
+                return (jsonify({"message": f"OK: Hanger {hanger_id_int} paired to User {user_id}"}), 200)
             else:
-                return jsonify({"message": "Hanger was already paired."}), 200
+                return jsonify({"message": "ALREADY_REPORTED: Hanger was already paired."}), 200
         else:
-            return jsonify({"error": f"User with user_id {user_id} not found."}), 404
+            return jsonify({"error": f"NOT_FOUND: User with user_id {user_id} not found."}), 404
 
     except ValueError:
-        return jsonify({"error": "user_id must be an integer"}), 400
+        return jsonify({"error": "BAD_REQUEST: user_id must be an integer"}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
 
 # 3. API ENDPOINT TO UPDATE STATUS (via App)
@@ -123,7 +130,7 @@ def assign_hanger():
 @app.route("/update_status", methods=["PUT"])
 def update_status():
     if customers_collection is None:
-        return jsonify({"error": "No database connection"}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
     try:
         # force=True ensures parsing even if Content-Type header is missing
@@ -134,12 +141,12 @@ def update_status():
         new_status = data.get("status", "").lower()
 
         if not user_id or hanger_id is None:
-            return jsonify({"error": "Missing user_id or hanger_id"}), 400
+            return jsonify({"error": "BAD_REQUEST: Missing user_id or hanger_id"}), 400
 
         # Extended status list as requested
-        allowed_statuses = ["inactive", "active", "heating", "drying", "on", "off"]
+        allowed_statuses = ["off", "on", "heating", "drying"]
         if new_status not in allowed_statuses:
-            return (jsonify({"error": f"Invalid status. Allowed: {allowed_statuses}"}), 400)
+            return (jsonify({"error": f"BAD_REQUEST: Invalid status. Allowed: {allowed_statuses}"}), 400)
 
         # THE UPDATE LOGIC:
         # 1. Filter: Find user by ID AND matching hanger_id (as INT) in the array
@@ -159,14 +166,14 @@ def update_status():
         result = customers_collection.update_one(filter_query, update_action)
 
         if result.matched_count > 0:
-            return jsonify({"message": f"Status updated to {new_status}"}), 200
+            return jsonify({"message": f"OK: Status updated to {new_status}"}), 200
         else:
-            return (jsonify({"error": "User not found or Hanger not paired to this user."}), 404)
+            return (jsonify({"error": "NOT FOUND: User not found or Hanger not paired to this user."}), 404)
 
     except ValueError:
-        return jsonify({"error": "IDs must be integers"}), 400
+        return jsonify({"error": "BAD_REQUEST: IDs must be integers"}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
 
 # 4. LOG TEMPERATURE (Data from Hardware)
@@ -174,7 +181,7 @@ def update_status():
 @app.route("/log_temp", methods=["POST"])
 def log_temperature():
     if logs_collection is None:
-        return jsonify({"error": "No database connection"}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
     try:
         data = request.get_json()
@@ -185,7 +192,7 @@ def log_temperature():
 
         # Check for missing fields
         if hanger_id is None or temperature is None:
-            return jsonify({"error": "Missing required fields: hanger_id or temperature"}), 400
+            return jsonify({"error": "BAD_REQUEST: Missing required fields: hanger_id or temperature"}), 400
 
         try:
             # Type Conversion
@@ -194,13 +201,13 @@ def log_temperature():
 
             # Safety check: 16-bit Hanger ID range
             if not (0 <= hanger_id_int <= 2**16 - 1):
-                return jsonify({"error": "Hanger ID out of valid 16-bit range"}), 400
+                return jsonify({"error": "BAD_REQUEST: Hanger ID out of valid 16-bit range"}), 400
 
             # 1. LOOKUP OWNER: Find the customer who has this hanger in their list
             # query the 'Customers' collection looking for the specific hanger_id inside the 'hangers' array
             owner = customers_collection.find_one({"hangers.hanger_id": hanger_id_int})
             if not owner:
-                return (jsonify({"error": f"Hanger {hanger_id_int} is not paired to any user. Data ignored."}), 404)
+                return (jsonify({"error": f"NOT_FOUND: Hanger {hanger_id_int} is not paired to any user"}), 404)
 
             # 2. Extract the User ID from the found owner document
             user_id_int = owner["user_id"]
@@ -213,14 +220,14 @@ def log_temperature():
             }
 
         except ValueError:
-            return jsonify({"error": "Data type error: hanger_id must be int, temp must be float"}), 400
+            return jsonify({"error": "BAD_REQUEST: hanger_id must be int, temp must be float"}), 400
 
         result = logs_collection.insert_one(log_entry)
 
-        return jsonify({"message": "Log entry created", "id": str(result.inserted_id)}), 201
+        return jsonify({"message": "CREATED: Log entry created", "id": str(result.inserted_id)}), 201
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "INTERNAL SERVER ERROR: No database connection"}), 500
 
 
 if __name__ == "__main__":
