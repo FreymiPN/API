@@ -165,20 +165,20 @@ def log_temperature():
         if hanger_id is None or temp is None or hum is None:
             return jsonify({"error": "BAD_REQUEST: hanger_id, temp and hum required"}), 400
 
-        hanger_id_int = int(hanger_id)
+        hanger_id_str = str(hanger_id)
         temp_float = float(temp)
         hum_float = float(hum)
 
-        if not (0 <= hanger_id_int <= 2**16 - 1):
+        if not (0 <= hanger_id_str <= 2**16 - 1):
             return jsonify({"error": "BAD_REQUEST: Hanger ID out of range"}), 400
 
-        owner = customers_collection.find_one({"hangers.hanger_id": hanger_id_int})
+        owner = customers_collection.find_one({"hangers.hanger_id": hanger_id_str})
         if not owner:
             return jsonify({"error": "NOT_FOUND: Hanger not paired"}), 404
 
         log_entry = {
             "user_id": owner["user_id"],
-            "hanger_id": hanger_id_int,
+            "hanger_id": hanger_id_str,
             "temp": temp_float,
             "hum": hum_float,
             "timestamp": datetime.now(),
